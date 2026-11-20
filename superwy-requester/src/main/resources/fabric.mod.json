@@ -1,0 +1,8 @@
+{
+  "schemaVersion":1,"id":"superwy_requester","version":"${version}","name":"SuperWY Requester",
+  "description":"Order building materials from Litematica projections and area selections without blocking movement",
+  "environment":"client","entrypoints":{"client":["dev.superwy.requester.RequesterClient"]},
+  "mixins":["superwy-requester.mixins.json","superwy-requester-litematica.mixins.json"],
+  "depends":{"fabricloader":"*","minecraft":"26.1.2","java":">=25","fabric-api":"*"},
+  "suggests":{"litematica":">=0.27.14"}
+}

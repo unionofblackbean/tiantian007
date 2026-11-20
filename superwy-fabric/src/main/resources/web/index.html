@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>SuperWY 仓库控制台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<aside><div class="brand"><span class="brand-icon">S</span><div>SUPERWY<small>CLIENT WAREHOUSE</small></div></div><div class="workspace-label">仓库工作区</div>
+<nav><button data-page="overview" class="active">运行概览</button><button data-page="regions" class="admin">仓库区域</button><button data-page="orders">物品订单</button><button data-page="shortage" class="admin">缺货对比</button><button data-page="mesh" class="admin">超级调度</button><button data-page="access">连接与接口</button></nav>
+<div class="aside-foot"><span id="online-dot" class="dot"></span><span id="connection">等待连接</span><small id="app-version">FABRIC · 26.1.2</small></div></aside>
+<main><header><div><div class="eyebrow">SUPERWY CONTROL CENTER</div><h1 id="page-title">运行概览</h1></div><div class="header-actions"><button id="refresh">刷新</button><button id="pause" class="admin danger">暂停执行</button><button id="resume" class="admin primary">启用执行</button></div></header>
+<div id="toast" role="status" hidden></div>
+<section id="login" class="card"><h2>连接客户端</h2><p>在游戏中执行 <code>/superwy token</code> 复制管理令牌。令牌只保留在当前浏览器会话中。</p><form id="login-form" class="inline"><input id="token" type="password" autocomplete="off" placeholder="粘贴访问令牌" required><button class="primary">连接</button></form></section>
+<div id="app" hidden>
+<section data-view="overview">
+ <div class="stats"><article class="card"><span>仓库区域</span><strong id="stat-variants">—</strong><small>按区域独立控制扫描</small></article><article class="card"><span>运行中的扫描区域</span><strong id="stat-containers">—</strong><small>多个区域轮流推进</small></article><article class="card"><span>进行中订单</span><strong id="stat-orders">—</strong><small>每个客户端串行执行</small></article></div>
+ <div class="two-col"><article class="card"><div class="section-head"><h2>执行能力</h2><span id="accepting" class="tag">待检查</span></div><div id="features"></div><div id="blocking" class="notice"></div><p class="muted">关闭扫描请使用右侧扫描开关；暂停执行会停止取货，需核对的订单不会自动补发。</p></article><article class="card admin"><div class="section-head"><h2>扫描进度</h2><div><button id="scan-toggle">关闭扫描</button><button id="scan-all">启动未停止区域</button></div></div><p id="scan-policy" class="muted"></p><p id="scan-label">等待扫描</p><progress id="scan-progress" max="100" value="0"></progress><p id="scan-counts" class="muted"></p><div id="scan-errors"></div></article></div>
+ <article class="card admin"><h2>当前世界与选择</h2><pre id="world-info"></pre><p class="muted">准星对准方块，使用 /superwy pos1 和 /superwy pos2，随后 /superwy region 名称 保存。也可以在按键设置中绑定“选择仓库区域”。</p></article>
+</section>
+<section data-view="regions" hidden>
+ <div class="two-col"><article class="card"><h2>保存仓库区域</h2><form id="region-form"><label>区域 ID<input name="id" value="warehouse" pattern="[A-Za-z0-9_-]{1,64}" required></label><label>第一点 x, y, z<input name="min" placeholder="100, 64, 100" required></label><label>第二点 x, y, z<input name="max" placeholder="120, 75, 120" required></label><label>刷新间隔（秒）<input name="intervalSeconds" type="number" min="30" max="86400" value="3600" required></label><button class="primary">保存区域</button></form></article>
+ <article class="card admin"><h2>取盒与定期背包存箱</h2><form id="workflow-form"><label>余物存放箱 x, y, z<input name="returnEntry" value="80,50,-23" required></label><label>空潜影盒补充箱 x, y, z<input name="boxSupply" value="129,53,-21" required></label><label>首次每轮最多取货格数<input name="packingRoundSlots" type="number" min="1" max="25" value="25" required></label><label>背包最多货盒数<input name="maxCarriedParcels" type="number" min="1" max="25" value="25" required></label><button class="primary">保存取盒与清理箱设置</button></form><p class="muted">超过 25 格自动用潜影盒打包；每次只取 1 个空盒。货盒达上限交付，收货假人满后换 _1、_2。累计完成交付 50 轮后，打开清理箱存入主背包 27 格余物；快捷栏、装备和副手保留。计数持久保存，批量任务算一轮；箱满保留余物并提示，恢复空间后下次交付重试。</p></article></div>
+ <article class="card"><h2>已保存区域</h2><p class="muted">各区域独立开始、停止并保留断点；多个运行区域轮流推进，无需等另一区域扫完。单独停止后不会被定时任务或全局开关重新启动，历史库存仍可取货。</p><div id="region-list"></div></article>
+</section>
+<section data-view="orders" hidden><div class="two-col"><article class="card"><h2>创建物品清单</h2><form id="order-form"><label>收货假人名称<input name="fakePlayerName" value="sf" pattern="[A-Za-z0-9_]{1,16}" maxlength="16" required></label><label>物品清单<textarea name="items" rows="7" required>minecraft:stone 128
+minecraft:iron_ingot 40</textarea><small>每行：物品 ID 数量；可追加完整组件散列进行精确匹配。</small></label><button id="submit-order" class="primary">提交订单</button></form><p class="muted">按缓存定位货源，优先打开地面潜影盒。超过 25 格自动打包，携盒达上限即原地交付后继续。每完成交付 50 轮，将主背包余物存入清理箱。</p></article><article class="card"><h2>最近订单详情</h2><pre id="order-detail">选择订单查看每行取货数量、装箱交付与收货证据。</pre></article></div><article class="card"><h2>订单队列</h2><p class="muted">保留全部进行中订单及最近 10 条已结束记录，更早的历史记录自动移出此列表。</p><p class="muted">普通单执行最多 500 秒，打包单最多 24 小时（不含排队，仍受订单有效期约束）。取消即停止本单并移出队列，物品留在原位；异常立即结束本单；缺货会在游戏内公告物品 ID。每单执行前自动关闭空光标容器界面；光标有物品时保留现场并停止，请先处理残留物品。</p><div id="orders-table" class="table-scroll"></div></article></section>
+<section data-view="shortage" hidden>
+ <article class="card admin"><h2>投影材料缺货对比</h2><p class="muted">Litematica 材料列表（L 键）点“导出”，选 <b>JSON</b> 格式，文件在 <code>config/litematica/material_list_*.json</code>。只看 Missing（投影里还没放的数量），与仓库库存对比，列出仓库不够的物品和还差多少个。CSV/TXT 导出的是中文名，部分新物品无法对应物品 ID，请用 JSON。</p>
+ <label>材料列表 JSON<input id="shortage-file" type="file" accept=".json,application/json"></label>
+ <p id="shortage-file-info" class="muted">尚未选择文件</p>
+ <div class="inline"><button id="shortage-rescan" class="primary" disabled>重新扫描全部仓库后对比</button><button id="shortage-cached" disabled>直接用当前库存对比</button><button id="shortage-cancel" hidden>停止等待</button></div>
+ <p id="shortage-status" class="muted"></p><progress id="shortage-progress" max="100" value="0" hidden></progress></article>
+ <article class="card admin"><div class="section-head"><h2 id="shortage-title">缺货清单</h2><button id="shortage-copy" disabled>复制缺货清单</button></div><div id="shortage-table" class="table-scroll"><p class="muted">选择文件并对比后显示。</p></div></article>
+</section>
+<section data-view="mesh" hidden>
+ <div class="stats"><article class="card"><span>在线机器人</span><strong id="mesh-stat-robots">—</strong><small id="mesh-stat-robots-note">含调度机器人</small></article><article class="card"><span>排队中的任务</span><strong id="mesh-stat-queued">—</strong><small>单项优先，批量整单排队</small></article><article class="card"><span>执行中的任务</span><strong id="mesh-stat-active">—</strong><small>按任务块分给多台机器人</small></article></div>
+ <article class="card admin"><div class="section-head"><h2>调度状态</h2><div class="inline"><button id="mesh-enable" class="primary">开启超级调度</button><button id="mesh-disable">关闭超级调度</button></div></div><p id="mesh-status">读取调度状态…</p><p class="muted">名为调度机器人的那台负责排队、派活并参与取货，其他机器人自动找到它。单项取货优先派给空闲机器人；批量按块分派、整单排队。掉线超过改派时间未回来，未交付部分改派给其他机器人；回来后继续原任务块。所有机器人都要用主人的 private jar；玩家需在取货端执行 /swrequest mesh on。在任何一台机器人的网页都能管理，操作会转给调度机器人执行。</p></article>
+ <article class="card admin"><div class="section-head"><h2>机器人</h2><label class="check"><input type="checkbox" id="mesh-auto" checked>每 3 秒自动刷新</label></div><div id="mesh-robots" class="table-scroll"></div></article>
+ <article class="card admin"><h2>任务管理</h2><p class="muted">“置顶”把任务移到同类任务的最前面；“取消”立即停止该任务所有机器人上的任务块，已交付的物品不收回。</p><div id="mesh-jobs" class="table-scroll"></div></article>
+ <div class="two-col"><article class="card admin"><h2>调度设置（本机）</h2><form id="mesh-settings"><label>调度机器人名<input name="authorityName" pattern="[A-Za-z0-9_]{1,16}" maxlength="16" required><small>每台机器人都要填同一个名字；有未完成任务块时不能修改。</small></label><label>离线判定（秒）<input name="offlineAfterSeconds" type="number" min="5" max="120" required></label><label>掉线后改派等待（秒）<input name="reassignAfterSeconds" type="number" min="30" max="3600" required></label><label>散装任务块大小（格）<input name="chunkSlots" type="number" min="1" max="25" required></label><label>装盒任务块大小（盒）<input name="parcelChunkBoxes" type="number" min="1" max="25" required></label><button class="primary">保存设置</button></form><p class="muted">后四项只在调度机器人上生效。</p></article>
+ <article class="card admin"><h2>调试</h2><div class="inline"><button id="mesh-events-load">读取事件日志</button><button id="mesh-debug-download">下载调度状态</button><button id="mesh-locks-clear" class="danger">清除收货假人锁</button></div><h2 class="mt">收货假人锁</h2><div id="mesh-locks"></div><h2 class="mt">本机任务块</h2><div id="mesh-own"></div><pre id="mesh-events">点击“读取事件日志”查看最近 200 条调度记录。</pre></article></div>
+</section>
+<section data-view="access" hidden>
+<article class="card admin"><h2>FRP 公网连接</h2><p id="frp-status">读取连接状态…</p><p class="muted">本机自动分配空闲端口，公网随机端口冲突后自动重选。停止隧道不停止游戏取货。连接指令只授权填写的收货假人。</p><div class="inline"><button id="frp-start" class="primary">启动 / 重试 FRP</button><button id="frp-stop">停止 FRP</button></div>
+<form id="connect-form" class="inline"><button class="primary">生成并复制连接指令</button></form>
+<label>发给玩家，在游戏中粘贴执行一次<textarea id="connect-command" rows="3" readonly spellcheck="false" autocomplete="off"></textarea></label><button id="copy-connect">复制指令</button><p class="muted">玩家执行后弹窗填写收货假人名，默认 sf，可在取货设置修改。每次生成独立玩家凭证；公网端口会持久保存，冲突换号后请重新生成。旧订单不会自动重发。私聊下单已停用，玩家端需 0.6.0 或更新版本。</p></article>
+<article class="card"><h2>外部程序接入</h2><p>玩家 mod 和脚本使用 HTTP JSON 请求同一接口。每个请求提交物品清单和收货假人名称，并携带持久保存的幂等键。</p><pre>POST /api/v1/orders
+Authorization: Bearer &lt;token&gt;
+Idempotency-Key: build-20261025-001
+Content-Type: application/json
+
+{
+  "warehouseId": "main",
+  "items": [{"itemId": "minecraft:stone", "count": 128}],
+  "delivery": {
+    "method": "carpet_fake_player",
+    "fakePlayerName": "sf"
+  }
+}</pre><a href="/openapi.json" target="_blank" rel="noopener">查看 OpenAPI 契约 ↗</a><p class="muted">默认地址仅本机可达。对外开放时在 config/superwy/config.json 设置监听地址、allowedHosts 和独立的玩家凭证，建议在反向代理后使用 HTTPS。</p></article><article class="card"><h2>当前会话</h2><p id="permitted-names"></p><button id="logout">退出并清除令牌</button></article></section>
+</div>
+</main></body></html>

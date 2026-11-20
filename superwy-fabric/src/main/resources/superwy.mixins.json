@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "dev.superwy.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "DebugQueryAccessor",
+    "InteractionPacketAccessor",
+    "TagQueryMixin",
+    "ControlClientMixin",
+    "NavigationMovementMixin",
+    "NavigationPlayerMixin",
+    "ClientInputAccessor",
+    "QueryPacketDecodeMixin",
+    "QueryDecodeConnectionMixin",
+    "ServuxPayloadMixin",
+    "ServuxNativeWriteMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

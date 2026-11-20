@@ -1,0 +1,110 @@
+plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
+
+version = project.mod_version
+group = 'dev.superwy'
+base { archivesName = 'superwy-fabric' }
+repositories { mavenCentral() }
+sourceSets.main.java.srcDir(file('shared-src').exists()?'shared-src':'../shared/src/main/java')
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    implementation 'org.xerial:sqlite-jdbc:3.50.3.0'
+    include 'org.xerial:sqlite-jdbc:3.50.3.0'
+    testImplementation platform('org.junit:junit-bom:5.12.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand(version: project.version) }
+}
+tasks.withType(JavaCompile).configureEach { options.release = 25; options.encoding = 'UTF-8' }
+java { sourceCompatibility = JavaVersion.VERSION_25; targetCompatibility = JavaVersion.VERSION_25; withSourcesJar() }
+test { useJUnitPlatform() }
+loom {
+    runs {
+        quickBridgeSmokeClient {
+            client()
+            name = 'SuperWY without optional QuickShulker client'
+            runDir = 'build/run/quickBridgeSmoke'
+            vmArgs '-Dsuperwy.smokeTest=true', '-Dsuperwy.smokePort=0', '--enable-native-access=ALL-UNNAMED'
+            programArgs '--username', 'SuperwySmoke'
+        }
+        smokeClient {
+            client()
+            name = 'SuperWY startup smoke check'
+            runDir = 'run-smoke'
+            vmArgs '-Dsuperwy.smokeTest=true', '-Dsuperwy.smokePort=0', '--enable-native-access=ALL-UNNAMED'
+            programArgs '--username', 'SuperwySmoke'
+        }
+    }
+}
+fabricApi {
+    configureTests {
+        createSourceSet = true
+        modId = 'superwy-gametest'
+        enableGameTests = false
+        enableClientGameTests = true
+    }
+}
+dependencies { gametestImplementation fileTree(dir: 'test-libs', include: ['*.jar']) }
+if (providers.gradleProperty('compatibilityMods').isPresent()) {
+    dependencies { gametestImplementation fileTree(dir: providers.gradleProperty('compatibilityMods').get(), include: ['*.jar']) }
+}
+if (providers.gradleProperty('steeringFixJar').isPresent()) {
+    dependencies { gametestImplementation files(providers.gradleProperty('steeringFixJar').get()) }
+}
+if (providers.gradleProperty('requesterJar').isPresent()) {
+    dependencies { gametestImplementation files(providers.gradleProperty('requesterJar').get()) }
+}
+loom.runs.named('clientGameTest') {
+    vmArgs '-Dsuperwy.gameTest=true'
+    if (providers.gradleProperty('projectionParcelsTest').isPresent()) vmArgs '-Dsuperwy.projectionParcelsTest=true'
+    if (providers.gradleProperty('batchSalvageTest').isPresent()) vmArgs '-Dsuperwy.batchSalvageTest=true'
+    if (providers.gradleProperty('directDeliveryTest').isPresent()) vmArgs '-Dsuperwy.directDeliveryTest=true'
+    if (providers.gradleProperty('nbtDecodeTest').isPresent()) vmArgs '-Dsuperwy.nbtDecodeTest=true'
+    if (providers.gradleProperty('forcedStopsTest').isPresent()) vmArgs '-Dsuperwy.forcedStopsTest=true'
+    if (providers.gradleProperty('containerPacketTest').isPresent()) vmArgs '-Dsuperwy.containerPacketTest=true'
+    if (providers.gradleProperty('directBaritoneTest').isPresent()) vmArgs '-Dsuperwy.directBaritoneTest=true'
+    if (providers.gradleProperty('servuxScanTest').isPresent()) vmArgs '-Dsuperwy.servuxScanTest=true', "-Dsuperwy.servuxReferenceJar=${file('build/servux-research/servux-0.10.4.jar').absolutePath}"
+    if (providers.gradleProperty('sourceFallbackTest').isPresent()) vmArgs '-Dsuperwy.sourceFallbackTest=true'
+    if (providers.gradleProperty('restockRetryTest').isPresent()) vmArgs '-Dsuperwy.restockRetryTest=true'
+    if (providers.gradleProperty('failureChatTest').isPresent()) vmArgs '-Dsuperwy.failureChatTest=true'
+    if (providers.gradleProperty('partialStockTest').isPresent()) vmArgs '-Dsuperwy.partialStockTest=true'
+    if (providers.gradleProperty('cleanupChestTest').isPresent()) vmArgs '-Dsuperwy.cleanupChestTest=true'
+    if (providers.gradleProperty('autoCloseMenuTest').isPresent()) vmArgs '-Dsuperwy.autoCloseMenuTest=true'
+    if (providers.gradleProperty('deliveryQueueTest').isPresent()) vmArgs '-Dsuperwy.deliveryQueueTest=true'
+    if (providers.gradleProperty('packingTest').isPresent()) vmArgs '-Dsuperwy.packingTest=true'
+    if (providers.gradleProperty('parcelCapTest').isPresent()) vmArgs '-Dsuperwy.parcelCapTest=true'
+    if (providers.gradleProperty('crampedPackingTest').isPresent()) vmArgs '-Dsuperwy.crampedPackingTest=true'
+    if (providers.gradleProperty('taskQueueTest').isPresent()) vmArgs '-Dsuperwy.taskQueueTest=true'
+    if (providers.gradleProperty('batchSkipTest').isPresent()) vmArgs '-Dsuperwy.batchSkipTest=true'
+    if (providers.gradleProperty('batchPickupTest').isPresent()) vmArgs '-Dsuperwy.batchPickupTest=true'
+    if (providers.gradleProperty('spawnFailureTest').isPresent()) vmArgs '-Dsuperwy.spawnFailureTest=true'
+    if (providers.gradleProperty('scanBackgroundTest').isPresent()) vmArgs '-Dsuperwy.scanBackgroundTest=true'
+}
+tasks.register('webPreview', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.superwy.WebPreview'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+tasks.register('warehousePerformance',JavaExec){
+    dependsOn testClasses
+    classpath=sourceSets.test.runtimeClasspath
+    mainClass='dev.superwy.WarehousePerformanceProbe'
+    maxHeapSize='2g'
+}
+tasks.register('frpLiveCheck',JavaExec){
+    dependsOn testClasses
+    classpath=sourceSets.test.runtimeClasspath
+    mainClass='dev.superwy.FrpLiveCheck'
+    if(providers.gradleProperty('frpLiveConfig').isPresent())args providers.gradleProperty('frpLiveConfig').get()
+}
+tasks.register('privatePresetCheck',JavaExec){
+    dependsOn testClasses
+    classpath=sourceSets.test.runtimeClasspath
+    if(providers.gradleProperty('privateJar').isPresent())classpath+=files(providers.gradleProperty('privateJar').get())
+    mainClass='dev.superwy.PrivatePresetCheck'
+}

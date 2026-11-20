@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "dev.superwy.baritonefix.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PlayerSteeringMixin",
+    "MovementSteeringMixin",
+    "ClientInputAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

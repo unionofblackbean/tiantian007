@@ -1,0 +1,1906 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SuperWY Warehouse API",
+    "version": "0.5.3",
+    "description": "SuperWY Fabric 0.5.3：每单执行前自动关闭空光标容器界面，等待中的请求不打断活动取放。HTTP 与同服私聊共享持久 FIFO。清单超过 25 格自动装盒，首轮最多 25 格、后续最多 24 格并预留工作槽；每次领取 1 个空盒，携带 25 盒即原地交付再继续，收货假人满时依次使用 _1、_2。每累计完成交付 50 个订单，将主背包 27 格余物存入清理箱，默认 80,50,-23；计数持久保存，批量订单算一轮，保留快捷栏、装备与副手。箱满或无法打开时保留余物，以 cleanupErrorCode 单独记录，已完成交付仍为成功。批量缺货与可核实项目异常逐项跳过。普通执行上限 500 秒，打包默认 86400 秒，均受订单有效期约束。保留认证、库存、扫描、FRP、队列位置与取消协议。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8765/api/v1",
+      "description": "本地开发默认地址；其他玩家需使用管理员公开的 HTTPS 地址"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "summary": "查询协议、仓库与执行能力",
+        "x-required-scopes": [],
+        "responses": {
+          "200": {
+            "description": "当前主体可见的能力与限额",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/inventory": {
+      "get": {
+        "operationId": "getInventory",
+        "summary": "查询可见库存变体",
+        "x-required-scopes": [
+          "inventory:read"
+        ],
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ItemId"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "分页库存；availableCount 为最近观测可预留量减去内部预留",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "createOrder",
+        "summary": "创建指定收货假人的物品清单订单",
+        "x-required-scopes": [
+          "orders:write"
+        ],
+        "description": "新请求先持久化后返回 202；动态校验异步执行。同主体相同幂等键及同义规范化请求返回原单 200；不同请求返回 409。items 顺序参与幂等散列。幂等记录保留至终态后至少 30 天。未知字段拒绝。默认执行器离线不接新单，返回 503 和具体阻挡原因码（如 OFFLINE / AUTOMATION_DISABLED），无具体原因时为 CAPABILITY_UNAVAILABLE，但幂等重放已有订单仍可返回 200。普通订单开始前完全没有候选货源时终止；取货过程中缺货时记录未取数量，继续后续行并交付已取物品，以 partial_stored_offline 结束并公告缺货及实际交付数量。allowPartial 保留兼容但不改变行为；分批物理交付无法撤回已完成部分。 批量草稿和批量执行期间继续接收单项及批量任务，所有成功提交任务共用 FIFO；响应的 queue.ahead 表示前方未结束任务数（包含当前执行任务），原单幂等重放保留。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrder"
+              },
+              "example": {
+                "warehouseId": "main",
+                "clientRequestId": "bridge-materials-001",
+                "items": [
+                  {
+                    "itemId": "minecraft:stone",
+                    "count": 128,
+                    "match": {
+                      "mode": "item_id"
+                    }
+                  },
+                  {
+                    "itemId": "minecraft:iron_ingot",
+                    "count": 40,
+                    "match": {
+                      "mode": "item_id"
+                    }
+                  }
+                ],
+                "delivery": {
+                  "method": "carpet_fake_player",
+                  "fakePlayerName": "sf",
+                  "stationId": "main"
+                },
+                "options": {
+                  "allowPartial": false,
+                  "expiresInSeconds": 86400
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "幂等重放：返回原订单的最新快照",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "新订单已持久化排队；不代表已取货或交付",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "订单查询地址",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/orders/{orderId}": {
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getOrder",
+        "summary": "查询本人订单",
+        "x-required-scopes": [
+          "orders:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "订单当前快照；只可访问当前主体的订单",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/orders/{orderId}/cancel": {
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      ],
+      "post": {
+        "operationId": "cancelOrder",
+        "summary": "立即取消本人订单",
+        "x-required-scopes": [
+          "orders:write"
+        ],
+        "description": "无业务请求体；停止当前订单的寻路、等待、查询和后续取放动作，持久保存 cancelled 后返回 200。已 cancelled 重放返回 200，其他终态返回 409。排队订单立即移除；执行订单不会等待归还物品或假人下线。现有物品、源盒和光标留在当前位置，保留已核实的 delivered 数量，不自动重发；下一单可在空闲槽执行，光标为空时自动关闭遗留容器界面后继续；光标有物品时新订单保留现场并停止，需先处理后重新下单。已发送到服务器的操作无法撤回。",
+        "responses": {
+          "200": {
+            "description": "本单操作已停止，cancelled 状态已经持久保存",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/queue": {
+      "get": {
+        "summary": "查询排队位置及自己的订单进度",
+        "description": "要求 orders:read。FIFO 位置按订单绑定的仓库/世界/维度计算；即使机器人离线也保留订单列表，不公开其他玩家身份或订单内容。",
+        "parameters": [
+          {
+            "name": "warehouseId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "main"
+            }
+          },
+          {
+            "name": "historyLimit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10,
+              "default": 5
+            },
+            "description": "返回最近已结束订单摘要数量；Web 使用 10，不包含其他主体订单。未结束订单不受此限制。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "排队状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "凭据缺少 orders:read 权限"
+          }
+        }
+      }
+    },
+    "/admin/scan/disable": {
+      "post": {
+        "operationId": "adminScanDisable",
+        "summary": "持久关闭全仓扫描，继续使用历史库存",
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "设置已保存，当前扫描单步完成后停止/开启；不暂停订单执行"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/admin/scan/enable": {
+      "post": {
+        "operationId": "adminScanEnable",
+        "summary": "持久开启全仓扫描",
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "设置已保存，当前扫描单步完成后停止/开启；不暂停订单执行"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/admin/scan/stop": {
+      "post": {
+        "operationId": "adminScanStop",
+        "summary": "停止指定区域并保存断点；省略 regionId 则关闭全局扫描",
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "regionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "返回 stopped=true；指定区域的 scanPaused 已持久保存。中止该区域的扫描寻路/查询，保存未完成位置，不记为失败，不影响其他区域或订单寻路。原库存仍可用。"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/admin/scan": {
+      "post": {
+        "operationId": "adminScan",
+        "summary": "开始或继续指定区域扫描；省略 regionId 则启动当前世界未单独停止的区域",
+        "x-admin-only": true,
+        "description": "独立启动，不加入整区 FIFO。多个运行区域按步骤轮流推进；取货仍优先。显式指定 regionId 会清除该区域 scanPaused。全局扫描关闭或执行器暂停时拒绝启动。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "regionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "区域配置已持久保存，返回 started=true 和 scanRegions；运行中的扫描单步完成后该区域即可获得步骤，无需等待整区结束。"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/admin/scan/start": {
+      "post": {
+        "operationId": "adminScanStart",
+        "summary": "开始或继续指定区域扫描；省略 regionId 则启动当前世界未单独停止的区域",
+        "x-admin-only": true,
+        "description": "独立启动，不加入整区 FIFO。多个运行区域按步骤轮流推进；取货仍优先。显式指定 regionId 会清除该区域 scanPaused。全局扫描关闭或执行器暂停时拒绝启动。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "regionId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "区域配置已持久保存，返回 started=true 和 scanRegions；运行中的扫描单步完成后该区域即可获得步骤，无需等待整区结束。"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/admin/status": {
+      "get": {
+        "operationId": "adminStatus",
+        "summary": "管理员状态，含每个区域的独立扫描状态与进度",
+        "x-admin-only": true,
+        "responses": {
+          "200": {
+            "description": "原 scan 字段保留最近步骤视图；scanRegions 提供当前世界各区域独立状态，regions[].scanPaused 为持久停止标记。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scanRegions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RegionScanStatus"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/dashboard": {
+      "get": {
+        "operationId": "adminDashboard",
+        "summary": "前端轻量概览，不返回库存树或全量历史订单",
+        "x-admin-only": true,
+        "responses": {
+          "200": {
+            "description": "保留能力、区域控制、扫描计数和订单摘要；没有 containers、订单 lines/request/cargo、全量 remainingContainers。历史最多 10 条，全部未结束订单保留；物品和历史数据库未删除。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "historyLimit": {
+                      "type": "integer",
+                      "const": 10
+                    },
+                    "orders": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/QueueOrder"
+                      }
+                    },
+                    "scan": {
+                      "type": "object"
+                    },
+                    "scanRegions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/network": {
+      "get": {
+        "summary": "查看本机与 FRP 隧道状态（不含凭证）",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功"
+          },
+          "403": {
+            "description": "需要管理员权限"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/frp/start": {
+      "post": {
+        "summary": "启动或重试托管 FRP 隧道",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功"
+          },
+          "403": {
+            "description": "需要管理员权限"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/frp/stop": {
+      "post": {
+        "summary": "停止托管隧道并持久保存关闭状态",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功"
+          },
+          "403": {
+            "description": "需要管理员权限"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/connect": {
+      "post": {
+        "summary": "生成由取货端选择收货假人名的独立玩家连接指令",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "command、publicUrl、recipientSelectable=true；执行后弹窗填写收货名，默认 sf。需要取货端 0.3.3 或更新版本。"
+          },
+          "403": {
+            "description": "需要管理员权限"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/workflow": {
+      "put": {
+        "operationId": "saveWorkflow",
+        "summary": "设置余物清理箱、空盒箱与打包上限；每完成交付 50 轮存箱，执行器空闲时可保存",
+        "x-required-scopes": [
+          "admin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "returnEntry",
+                  "boxSupply",
+                  "packingRoundSlots",
+                  "maxCarriedParcels"
+                ],
+                "properties": {
+                  "returnEntry": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "x",
+                      "y",
+                      "z"
+                    ],
+                    "properties": {
+                      "x": {
+                        "type": "integer"
+                      },
+                      "y": {
+                        "type": "integer"
+                      },
+                      "z": {
+                        "type": "integer"
+                      }
+                    },
+                    "description": "余物清理箱坐标，默认 80,50,-23；沿用兼容字段名，每累计完成交付 50 个订单打开箱子存入主背包余物。"
+                  },
+                  "boxSupply": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "x",
+                      "y",
+                      "z"
+                    ],
+                    "properties": {
+                      "x": {
+                        "type": "integer"
+                      },
+                      "y": {
+                        "type": "integer"
+                      },
+                      "z": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "packingRoundSlots": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  },
+                  "maxCarriedParcels": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 25
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "设置已保存"
+          },
+          "400": {
+            "description": "坐标或上限无效，或执行器正在工作"
+          },
+          "403": {
+            "description": "需要管理员凭据"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "管理员签发的主体凭证，绑定 scope、仓库和假人名；不能放入 URL。"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "统一错误；429 附 Retry-After。无权访问他人订单与不存在的订单均为 404。",
+        "headers": {
+          "Retry-After": {
+            "description": "429 时必须提供的等待秒数",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ItemId": {
+        "type": "string",
+        "pattern": "^[a-z0-9_.-]+:[a-z0-9_./-]+$",
+        "maxLength": 256,
+        "examples": [
+          "minecraft:stone"
+        ]
+      },
+      "FakePlayerName": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_]{1,16}$",
+        "description": "由请求者指定且凭证获准的收货假人名；名称按不区分大小写加锁，sf 只是示例。",
+        "examples": [
+          "sf",
+          "BuilderOrder01"
+        ]
+      },
+      "ComponentHash": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$",
+        "description": "完整有效组件规范化后的 SHA-256，不含 count；从当前仓库库存变体获得。"
+      },
+      "ItemMatch": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "const": "item_id"
+              }
+            },
+            "description": "只在无歧义且符合仓库规则的普通变体间选取，否则 AMBIGUOUS_ITEM。"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "componentHash"
+            ],
+            "properties": {
+              "mode": {
+                "const": "exact_components"
+              },
+              "componentHash": {
+                "$ref": "#/components/schemas/ComponentHash"
+              }
+            }
+          }
+        ],
+        "default": {
+          "mode": "item_id"
+        }
+      },
+      "RequestLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemId",
+          "count"
+        ],
+        "properties": {
+          "itemId": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000,
+            "description": "单个物品数量，另受仓库/凭证总量预算约束。"
+          },
+          "match": {
+            "$ref": "#/components/schemas/ItemMatch"
+          }
+        }
+      },
+      "RequestedDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "method",
+          "fakePlayerName"
+        ],
+        "properties": {
+          "method": {
+            "const": "carpet_fake_player"
+          },
+          "fakePlayerName": {
+            "$ref": "#/components/schemas/FakePlayerName"
+          },
+          "stationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "旧交付站字段，保留请求兼容；原地交付忽略该值，不要求配置站点。",
+            "deprecated": true
+          }
+        }
+      },
+      "OrderOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "allowPartial": {
+            "type": "boolean",
+            "default": false,
+            "deprecated": true,
+            "description": "兼容字段；不控制部分履约。取货过程中缺货会交付已核实取到的物品；开始前完全无候选货源的普通订单仍失败。"
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "default": 86400
+          }
+        }
+      },
+      "CreateOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "warehouseId",
+          "items",
+          "delivery"
+        ],
+        "properties": {
+          "warehouseId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "clientRequestId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/RequestLine"
+            },
+            "description": "保持顺序逐行取货；重复行保留，预检时累加需求。"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/RequestedDelivery"
+          },
+          "options": {
+            "$ref": "#/components/schemas/OrderOptions"
+          }
+        }
+      },
+      "OrderState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "validating",
+          "reserving",
+          "fetching",
+          "packing",
+          "delivery_preflight",
+          "spawning",
+          "transferring",
+          "verifying",
+          "despawning",
+          "stored_offline",
+          "partial_stored_offline",
+          "waiting_stock",
+          "waiting_inventory",
+          "clearing_inventory",
+          "waiting_boxes",
+          "waiting_recipient",
+          "paused",
+          "recovering",
+          "delivery_uncertain",
+          "cancelling",
+          "cancelled",
+          "failed"
+        ]
+      },
+      "OrderLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lineIndex",
+          "itemId",
+          "requested",
+          "fetched",
+          "packed",
+          "delivered",
+          "shortfall"
+        ],
+        "properties": {
+          "lineIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "itemId": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "componentHash": {
+            "$ref": "#/components/schemas/ComponentHash"
+          },
+          "requested": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "fetched": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "packed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "delivered": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "shortfall": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skipped": {
+            "type": "boolean",
+            "description": "该行因缺货或批量可核实的取货异常被跳过；已取/已交数量保留真实值，shortfall 为未取余量，errorCode 记录原因。"
+          }
+        }
+      },
+      "PackageLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lineIndex",
+          "itemId",
+          "count"
+        ],
+        "properties": {
+          "lineIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "itemId": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "componentHash": {
+            "$ref": "#/components/schemas/ComponentHash"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000000
+          }
+        }
+      },
+      "Package": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "packageId",
+          "batchId",
+          "manifestHash",
+          "status",
+          "custody",
+          "lines"
+        ],
+        "properties": {
+          "packageId": {
+            "type": "string"
+          },
+          "batchId": {
+            "type": "string"
+          },
+          "manifestHash": {
+            "$ref": "#/components/schemas/ComponentHash"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "packing",
+              "packed",
+              "transferring",
+              "received",
+              "uncertain",
+              "returned",
+              "stored_offline"
+            ]
+          },
+          "custody": {
+            "type": "string",
+            "enum": [
+              "robot",
+              "ground",
+              "fake_player",
+              "recovery_storage",
+              "unknown",
+              "recipient"
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PackageLine"
+            }
+          },
+          "inventorySlot": {
+            "type": "integer",
+            "minimum": -1,
+            "maximum": 35
+          },
+          "deliveredTo": {
+            "type": "string",
+            "description": "该盒实际存放的收货假人名。"
+          }
+        }
+      },
+      "DeliveryProgress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fakePlayerName",
+          "stage",
+          "verifiedPackages",
+          "collectionStatus"
+        ],
+        "properties": {
+          "fakePlayerName": {
+            "$ref": "#/components/schemas/FakePlayerName"
+          },
+          "fakePlayerUuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "preflight",
+              "spawned",
+              "transferring",
+              "verifying",
+              "received",
+              "despawning",
+              "stored_offline",
+              "uncertain",
+              "interrupted"
+            ]
+          },
+          "verifiedPackages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "已核实交付的货盒数；散装交付以 lines[].delivered 为准。"
+          },
+          "collectionStatus": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "collected",
+              "partial"
+            ]
+          },
+          "receiptSource": {
+            "type": "string",
+            "enum": [
+              "entity_nbt",
+              "server_receipt",
+              "manual_verified",
+              "gca_menu_and_entity_nbt",
+              "gca_parcel_and_entity_nbt"
+            ]
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "offlineObservedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "legacy_shulker",
+              "gca_inventory",
+              "shulker_parcels"
+            ]
+          },
+          "spawnMode": {
+            "type": "string",
+            "enum": [
+              "in_place"
+            ],
+            "description": "在机器人当前位置召唤收货假人。"
+          },
+          "spawnPosition": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            },
+            "description": "最近一批召唤前保存的精确 x/y/z 坐标。"
+          },
+          "spawnDimension": {
+            "type": "string",
+            "description": "最近一批假人召唤所在维度。"
+          },
+          "baseFakePlayerName": {
+            "type": "string"
+          },
+          "recipientSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recipientNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "warehouseId",
+          "state",
+          "revision",
+          "createdAt",
+          "updatedAt",
+          "expiresAt",
+          "currentLineIndex",
+          "lines",
+          "packages",
+          "delivery",
+          "blockingReason",
+          "queueSequence",
+          "queue"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "clientRequestId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OrderState"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currentLineIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 127
+          },
+          "lines": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {
+              "$ref": "#/components/schemas/OrderLine"
+            }
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Package"
+            },
+            "description": "旧装箱流程兼容字段；GCA 散装交付为空数组，不创建虚构包裹。"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/DeliveryProgress"
+          },
+          "blockingReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queueSequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueuePosition"
+          },
+          "executionStartedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "本次开始执行的时间；排队不计执行时限。"
+          },
+          "executionStoppedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "本单完成或被停止的时间。"
+          },
+          "executionTimeoutSeconds": {
+            "type": "integer",
+            "description": "普通任务 500 秒，打包默认 86400 秒；排队不计时。",
+            "minimum": 500,
+            "maximum": 86400
+          },
+          "terminationReason": {
+            "type": "string",
+            "enum": [
+              "USER_CANCELLED",
+              "ORDER_TIMEOUT",
+              "EXPIRED",
+              "EXECUTION_ERROR"
+            ],
+            "description": "主动取消、执行超时、订单到期或执行异常；中断保留物品去向。"
+          },
+          "missingItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "缺货物品 ID，去重；完成后每个 ID 通过普通聊天公告缺货及实际交付数量，重复行合并计数。"
+          },
+          "needsItemReview": {
+            "type": "boolean",
+            "description": "存在留存物品或未核实操作，需要人工核对；订单已结束，不阻挡后续 FIFO。"
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "面向玩家的中文异常说明；无异常时为空。errorCode 保留稳定机器代码。"
+          },
+          "packingMode": {
+            "type": "boolean"
+          },
+          "cleanupCompleted": {
+            "type": "boolean",
+            "description": "本订单结束时已完成定期清理，作为持久计数的复位检查点。"
+          },
+          "cleanupRoundCounted": {
+            "type": "boolean",
+            "description": "本订单已完成交付并计入 50 轮清理周期，重复保存不重复计数。"
+          },
+          "cleanupErrorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "清理箱已满、打不开或存箱核对失败等独立异常；不改变已核实的交付数量及成功状态。"
+          }
+        }
+      },
+      "InventoryVariant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "itemId",
+          "componentHash",
+          "variantSummary",
+          "maxStackSize",
+          "observedCount",
+          "reservableCount",
+          "reservedCount",
+          "availableCount",
+          "stale",
+          "observedAt"
+        ],
+        "properties": {
+          "itemId": {
+            "$ref": "#/components/schemas/ItemId"
+          },
+          "componentHash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "解析不完整时为 null，该变体不得承诺精确取货。"
+          },
+          "variantSummary": {
+            "type": "string"
+          },
+          "maxStackSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "observedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "reservableCount": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "reservedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "availableCount": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "含已标记不完整或失效的来源；不会因库存年龄而置为 true"
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "实际观测时间；重启和读取历史缓存不会重置"
+          }
+        }
+      },
+      "InventoryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "warehouseId",
+          "indexRevision",
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "warehouseId": {
+            "type": "string"
+          },
+          "indexRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryVariant"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "FeatureStatus": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unavailable",
+          "unknown"
+        ]
+      },
+      "Capabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocolVersion",
+          "minecraftVersion",
+          "connectionState",
+          "canAcceptOrders",
+          "activeWarehouseId",
+          "warehouses",
+          "allowedFakePlayerNames",
+          "features",
+          "limits",
+          "blockingReasons"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "const": "1"
+          },
+          "minecraftVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connectionState": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "connecting",
+              "online",
+              "recovering"
+            ]
+          },
+          "canAcceptOrders": {
+            "type": "boolean"
+          },
+          "activeWarehouseId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "warehouses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "warehouseId",
+                "displayName",
+                "dimension"
+              ],
+              "properties": {
+                "warehouseId": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "dimension": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "nbtBlockQuery",
+              "quickShulker",
+              "carpetPlayerCommand",
+              "recipientInventoryRead",
+              "recipientReceipt",
+              "navigation"
+            ],
+            "properties": {
+              "nbtBlockQuery": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              },
+              "quickShulker": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              },
+              "carpetPlayerCommand": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              },
+              "recipientInventoryRead": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              },
+              "recipientReceipt": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              },
+              "navigation": {
+                "$ref": "#/components/schemas/FeatureStatus"
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "maxBodyBytes",
+              "maxLines",
+              "maxLineCount",
+              "maxOpenOrders",
+              "writeRequestsPerMinute",
+              "idempotencyRetentionDays"
+            ],
+            "properties": {
+              "maxBodyBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 262144
+              },
+              "maxLines": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 128
+              },
+              "maxLineCount": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000000
+              },
+              "maxOpenOrders": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "writeRequestsPerMinute": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "idempotencyRetentionDays": {
+                "type": "integer",
+                "minimum": 30
+              }
+            }
+          },
+          "allowedFakePlayerNames": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FakePlayerName"
+            },
+            "description": "当前凭证获准使用的收货假人名称。"
+          },
+          "blockingReasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "modVersion": {
+            "type": "string",
+            "description": "实际运行的机器人 mod 版本",
+            "examples": [
+              "0.3.2"
+            ]
+          },
+          "scanEnabled": {
+            "type": "boolean",
+            "description": "全仓扫描开关，关闭不影响历史库存取货"
+          },
+          "inventoryMode": {
+            "type": "string",
+            "enum": [
+              "cached_live_updates",
+              "historical_cache"
+            ]
+          },
+          "blockingMessages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "与 blockingReasons 对应的中文说明。"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId",
+              "retryable"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string",
+                "description": "面向玩家的中文错误说明；code 保留机器代码。"
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "QueuePosition": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "同仓库/世界/维度的 FIFO 位置，含正在处理的订单。结束订单 position=0。sequence 是成功入队时持久分配的编号。",
+        "required": [
+          "sequence",
+          "position",
+          "ahead",
+          "totalPending",
+          "active"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ahead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalPending": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QueueOrder": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OrderState"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueuePosition"
+          },
+          "fakePlayerName": {
+            "type": "string"
+          },
+          "blockingReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "fetched": {
+            "type": "integer"
+          },
+          "delivered": {
+            "type": "integer"
+          },
+          "clientRequestId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "missingItems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "needsItemReview": {
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "面向玩家的中文异常说明；无异常时为空。errorCode 保留稳定机器代码。"
+          }
+        }
+      },
+      "QueueStatus": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "const": "fifo"
+          },
+          "warehouseId": {
+            "type": "string"
+          },
+          "workerState": {
+            "type": "string"
+          },
+          "totalPending": {
+            "type": "integer",
+            "description": "仓库所有世界/维度中未结束订单的总数"
+          },
+          "waitingCount": {
+            "type": "integer"
+          },
+          "orders": {
+            "type": "array",
+            "description": "普通用户仅自己的未结束订单和最近 5 个已结束订单；管理员可见所有玩家。",
+            "items": {
+              "$ref": "#/components/schemas/QueueOrder"
+            }
+          },
+          "headState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "当前机器人世界/维度的队首处理状态；不包含其他玩家身份或物品。"
+          }
+        }
+      },
+      "RegionScanStatus": {
+        "type": "object",
+        "required": [
+          "regionId",
+          "state",
+          "scanPaused",
+          "running"
+        ],
+        "properties": {
+          "regionId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "running / discovering / reading / stopped / disabled / paused_for_order / complete / complete_with_skips / idle"
+          },
+          "scanPaused": {
+            "type": "boolean",
+            "description": "该区域已单独停止；全局扫描开关或定时任务不会解除此标记。"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "处于运行集合；按单步轮流扫描，不是等待另一区域整轮完成。"
+          },
+          "processed": {
+            "type": "integer"
+          },
+          "discovered": {
+            "type": "integer"
+          },
+          "remainingChunks": {
+            "type": "integer"
+          },
+          "remainingContainers": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "nextDueAt": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      }
+    }
+  },
+  "x-private-message-transport": {
+    "protocol": "swget1 / swreply1",
+    "enabledByDefault": true,
+    "shortKeyRequiredByDefault": false,
+    "optionalShortKeyLength": 5,
+    "documentation": "PRIVATE_MESSAGES.md",
+    "systemMessageCompatibility": [
+      "vanilla translated private component",
+      "Player悄悄地对你说：正文",
+      "Player whispers to you: message"
+    ]
+  }
+}

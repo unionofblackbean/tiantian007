@@ -1,0 +1,4 @@
+[
+  {"id":"bh","world":"bbbb.icu#default","dimension":"minecraft:the_end","min":{"x":78,"y":49,"z":-89},"max":{"x":117,"y":53,"z":-6},"intervalSeconds":3600,"enabled":true,"scanPaused":true,"lastSuccessAt":0,"lastScanAt":0},
+  {"id":"warehouse","world":"bbbb.icu#default","dimension":"minecraft:the_end","min":{"x":147,"y":42,"z":-74},"max":{"x":173,"y":61,"z":91},"intervalSeconds":3600,"enabled":true,"scanPaused":true,"lastSuccessAt":0,"lastScanAt":0}
+]

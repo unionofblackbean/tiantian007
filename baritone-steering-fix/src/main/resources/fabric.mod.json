@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "baritone_steering_fix",
+  "version": "${version}",
+  "name": "Baritone Steering Fix",
+  "description": "Applies Baritone's planned rotation at the actual movement and jump stages on Minecraft 26.1.2.",
+  "environment": "client",
+  "entrypoints": { "client": ["dev.superwy.baritonefix.SteeringBridge"] },
+  "mixins": ["baritone-steering-fix.mixins.json"],
+  "depends": { "fabricloader": ">=0.19.5", "minecraft": "26.1.2", "java": ">=25", "fabric-api": "*", "baritone": "1.18.x" }
+}

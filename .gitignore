@@ -1,0 +1,12 @@
+.gradle/
+build/
+build-*/
+run/
+run-smoke/
+test-libs/
+dist/
+logs/
+.idea/
+*.iml
+*.log
+__pycache__/

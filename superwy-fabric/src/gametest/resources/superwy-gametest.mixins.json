@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "package": "dev.superwy.fault",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "NavigationYawConflictMixin",
+    "BatchMenuClosureMixin",
+    "TaskQueueGateMixin",
+    "BatchSalvageFaultMixin",
+    "NbtWireTransportMixin",
+    "ServuxNativeDecodeFixtureMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

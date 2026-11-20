@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "superwy",
+  "version": "${version}",
+  "name": "SuperWY Warehouse",
+  "description": "Client warehouse scanner, web control and verified order fulfilment",
+  "environment": "client",
+  "entrypoints": { "client": ["dev.superwy.SuperwyClient"] },
+  "mixins": ["superwy.mixins.json"],
+  "depends": { "fabricloader": ">=0.19.5", "minecraft": "26.1.2", "java": ">=25", "fabric-api": ">=0.155.3" },
+  "suggests": { "baritone": "*", "quickshulker": "*" }
+}

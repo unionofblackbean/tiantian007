@@ -1,0 +1,22 @@
+plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
+version = project.mod_version
+group = 'dev.superwy'
+base { archivesName = 'baritone-steering-fix' }
+repositories { mavenCentral() }
+dependencies {
+    minecraft 'com.mojang:minecraft:26.1.2'
+    implementation 'net.fabricmc:fabric-loader:0.19.5'
+    implementation 'net.fabricmc.fabric-api:fabric-api:0.155.3+26.1.2'
+    compileOnly files('../superwy-fabric/test-libs/baritone-api-fabric-1.18.0.jar')
+}
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand(version: project.version) }
+}
+tasks.withType(JavaCompile).configureEach { options.release = 25; options.encoding = 'UTF-8' }
+java { sourceCompatibility = JavaVersion.VERSION_25; targetCompatibility = JavaVersion.VERSION_25; withSourcesJar() }
+fabricApi { configureTests { createSourceSet = true; modId = 'baritone-steering-fix-gametest'; enableGameTests = false; enableClientGameTests = true } }
+dependencies { gametestImplementation fileTree(dir: '../superwy-fabric/test-libs', include: ['*.jar']) }
+if (providers.gradleProperty('compatibilityMods').isPresent()) {
+    dependencies { gametestImplementation fileTree(dir: providers.gradleProperty('compatibilityMods').get(), include: ['*.jar']) }
+}

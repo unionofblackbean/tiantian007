@@ -1,0 +1,6 @@
+{
+  "key.category.superwy_requester.requester": "SuperWY Requester",
+  "key.superwy_requester.pickup": "Quick pickup (schematic material)",
+  "key.superwy_requester.confirm": "Confirm pickup / submit batch",
+  "key.superwy_requester.queue": "Add material to batch queue"
+}

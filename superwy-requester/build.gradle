@@ -1,0 +1,33 @@
+plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
+version = project.mod_version
+group = 'dev.superwy'
+base { archivesName = 'superwy-requester' }
+repositories { mavenCentral() }
+sourceSets.main.java.srcDir(file('shared-src').exists()?'shared-src':'../shared/src/main/java')
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    testImplementation platform('org.junit:junit-bom:5.12.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+processResources { inputs.property 'version', project.version; filesMatching('fabric.mod.json') { expand(version: project.version) } }
+tasks.withType(JavaCompile).configureEach { options.release=25; options.encoding='UTF-8' }
+java { sourceCompatibility=JavaVersion.VERSION_25; targetCompatibility=JavaVersion.VERSION_25; withSourcesJar() }
+test { useJUnitPlatform() }
+fabricApi { configureTests { createSourceSet=true; modId='superwy-requester-gametest'; enableGameTests=false; enableClientGameTests=true } }
+// Litematica/MaLiLib are optional at runtime; only the area-editor button and selection scan compile against them.
+dependencies { compileOnly fileTree(dir:'test-libs',include:['litematica-*.jar','malilib-*.jar']) }
+dependencies { gametestImplementation fileTree(dir:'test-libs',include:['*.jar']) }
+loom.runs.named('clientGameTest') {
+    if (providers.gradleProperty('projectionParcelsTest').isPresent()) vmArgs '-Dsuperwy.projectionParcelsTest=true', "-Dsuperwy.projectionEvidenceDir=${file('verification/projection').absolutePath}"
+}
+// Optional manual visual acceptance uses a separate local save/config directory.
+if (providers.gradleProperty('projectionVisualCheck').isPresent()) {
+    dependencies { runtimeOnly fileTree(dir:'test-libs',include:['*.jar']) }
+    loom.runs.named('client') {
+        runDir = 'build/run/projectionVisual'
+        programArgs '--quickPlaySingleplayer', 'Projection acceptance'
+    }
+}
