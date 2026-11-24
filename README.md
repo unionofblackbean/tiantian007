@@ -1,5 +1,7 @@
 # SuperWY Fabric（机器人 0.6.7 / 玩家取货端 0.6.2）
 
+使用手册：https://xiaodoumedia.feishu.cn/wiki/OkcowvPLTiqiGBkgtKzcB9RJnXg?from=from_copylink
+
 两个独立的 Minecraft 26.1.2 Fabric 客户端 mod：
 
 - **机器人端**：[superwy-fabric](superwy-fabric/README.md)，轻量 Web 控制（历史列表最多 10 条）、私聊接单（可选 5 位短 key）、多区域独立控制与持久断点扫描、后台库存解码和索引查询、容器黄标与未扫描坐标、多人 FIFO 排队、异常立即停止与普通聊天缺货提示、按缓存取物及 GCA 假人背包原地散装交付；共享玩家控制，支持自由转向、手动移动及失焦后台寻路；快捷栏保留，已有背包物品不移动。
